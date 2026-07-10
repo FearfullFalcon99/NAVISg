@@ -49,7 +49,7 @@ def _friction_chen(Re, roughness_in, d_in):
         return 64.0 / Re          # laminar, Darcy
 
     e = roughness_in / d_in       # relative roughness
-    tmp = -4.0 * math.log10(
+    tmp = -2.0 * math.log10(
         e / 3.7065
         - (5.0452 / Re) * math.log10(
             e ** 1.1098 / 2.8257 + (7.149 / Re) ** 0.8981

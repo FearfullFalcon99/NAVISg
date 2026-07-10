@@ -25,11 +25,11 @@ class PVTPlotsWidget(QWidget):
 
     def _style_axes(self):
         for axis in self.axes.flat:
-            axis.set_facecolor('#ffffff')
-            axis.grid(True, linestyle='--', linewidth=0.4, color='#d5e4f3', alpha=0.9)
-            axis.tick_params(labelsize=7, colors='#12324f')
+            axis.set_facecolor('#FFFFFF')
+            axis.grid(False) # Removed gridlines
+            axis.tick_params(labelsize=7, colors='#2D1E1E')
             for spine in axis.spines.values():
-                spine.set_color('#b8d4ee')
+                spine.set_color('#D4C3C3')
 
     def clear(self):
         titles = [
@@ -46,10 +46,10 @@ class PVTPlotsWidget(QWidget):
 
         for axis, (title, ylabel) in zip(self.axes.flat, titles):
             axis.cla()
-            axis.set_title(title, fontsize=9, fontweight='bold', color='#12324f')
-            axis.set_xlabel("Pressure, psia", fontsize=8, color='#12324f')
-            axis.set_ylabel(ylabel, fontsize=8, color='#12324f')
-            axis.grid(True, linestyle='--', linewidth=0.4, color='#d5e4f3', alpha=0.9)
+            axis.set_title(title, fontsize=9, fontweight='bold', color='#8B1E1E')
+            axis.set_xlabel("Pressure, psia", fontsize=8, color='#2D1E1E')
+            axis.set_ylabel(ylabel, fontsize=8, color='#2D1E1E')
+            axis.grid(False)
             axis.tick_params(labelsize=7, colors='#12324f')
             for spine in axis.spines.values():
                 spine.set_color('#b8d4ee')
@@ -102,7 +102,7 @@ class PVTPlotsWidget(QWidget):
             for spine in axis.spines.values():
                 spine.set_color('#b8d4ee')
             if values.size:
-                axis.plot(pressures, values, color='#5a9edc', linewidth=1.6)
+                axis.plot(pressures, values, color='#8B1E1E', linewidth=1.8)
                 axis.set_xlim(float(np.min(pressures)), float(np.max(pressures)))
 
         self.canvas.draw_idle()

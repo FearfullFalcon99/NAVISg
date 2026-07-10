@@ -3,9 +3,9 @@
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=['.'],
     binaries=[],
-    datas=[],
+    datas=[('assets', 'assets'), ('NAVIS App Logo.png', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='NodalAnalysisApp',
+    name='NAVIS',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

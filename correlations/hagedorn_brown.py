@@ -30,7 +30,7 @@ def _friction(Re, rough, d_in):
     e = rough / d_in                  # relative roughness
 
     # Chen's explicit formula for turbulent friction factor (Darcy)
-    tmp = -4.0 * math.log10(
+    tmp = -2.0 * math.log10(
         e / 3.7065
         - (5.0452 / Re) * math.log10(e**1.1098 / 2.8257 + (7.149 / Re)**0.8981)
     )
@@ -196,10 +196,10 @@ def _blended_holdup(fp):
     hi = L_B         # pure HB above this
 
     if lam_g < lo:
-        return _griffith_holdup(fp), 'griffith'
+        return _griffith_holdup(fp), 'Bubble'
 
     elif lam_g >= hi:
-        return _hb_holdup(fp), 'hb'
+        return _hb_holdup(fp), 'Mist'
 
     else:
         # Transition: linear blend
@@ -207,7 +207,7 @@ def _blended_holdup(fp):
         el_g  = _griffith_holdup(fp)
         el_hb = _hb_holdup(fp)
         el    = (1.0 - alpha) * el_g + alpha * el_hb
-        return max(min(el, 1.0), fp['lam_l']), 'transition'
+        return max(min(el, 1.0), fp['lam_l']), 'Transition'
 
 
 # ─────────────────────────────────────────────────────────────
