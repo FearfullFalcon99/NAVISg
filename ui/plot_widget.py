@@ -49,9 +49,12 @@ class PlotWidget(QWidget):
     # ui/plot_widget.py (Replace only the plot method block)-----------------------------------
 
     def plot(self, ipr_data=None, vlp_curves=None, op_point=None):
+        self._hide_annot()  # <--- ADD THIS: Hides the tooltip before clearing axes
         self.ax.cla()
         self._style_axes()
         self.lines = []
+        
+        # ... (rest of your plot logic remains exactly the same)
 
         colors = ['#8B1E1E', '#A32B2B', '#B23A3A', '#CD5C5C', '#E9967A']
         
@@ -127,6 +130,7 @@ class PlotWidget(QWidget):
         self.canvas.draw()
 
     def clear(self):
+        self._hide_annot()  # <--- ADD THIS HERE TOO
         self.ax.cla()
         self._style_axes()
         self.lines = []

@@ -1068,8 +1068,8 @@ class MainWindow(QMainWindow):
             if q_op:
                 self.status.showMessage(
                     f"Gas Lift Op. Point Found: Qo = {q_op:.0f} STB/d  |  Pwf = {p_op:.0f} psia  |  "
-                    f"Optimum GLR = {res.get('opt_glr', 0):.0f} scf/STB  |  "
-                    f"Injection Depth = {res.get('inj_depth', 0):.0f} ft"
+                    f"Optimum GLR = {(res.get('opt_glr') or 0):.0f} scf/STB  |  "
+                    f"Injection Depth = {(res.get('inj_depth') or 0):.0f} ft"
                 )
             else:
                 self.status.showMessage("Analysis complete: No intersection found.")
@@ -1122,7 +1122,7 @@ class MainWindow(QMainWindow):
                 self.status.showMessage(
                     f"Limited GL Op. Point Found: Qo = {q_op:.0f} STB/d  |  Pwf = {p_op:.0f} psia  |  "
                     f"Inj. Gas = {params['qg_avail']:.0f} Mscf/d  |  "
-                    f"Injection Depth = {res.get('inj_depth', 0):.0f} ft"
+                    f"Injection Depth = {(res.get('inj_depth') or 0):.0f} ft"
                 )
             else:
                 self.status.showMessage("Analysis complete: No intersection found.")

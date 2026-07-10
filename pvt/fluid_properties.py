@@ -610,4 +610,5 @@ def fluid_properties_at_PT(
 
         A=A,
         d_in=d_in,
+        Cl = 0.0
     )
