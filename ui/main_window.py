@@ -309,6 +309,85 @@ class GLAdvancedWorker(QObject):
             import traceback
             self.error.emit(f"{e}\n{traceback.format_exc()}")
 
+class GLLimitedWorker(QObject):
+    finished = Signal(dict)
+    error = Signal(str)
+    
+    def __init__(self, params):
+        super().__init__()
+        self.p = params
+        
+    def run(self):
+        try:
+            p = self.p
+            
+            # Step 10: Inflow Performance Curve
+            if p.get('ipr_model', 'Vogel') == 'Standing':
+                from ipr.standing import standing_ipr
+                ipr_p, ipr_q, Qmax, J = standing_ipr(
+                    Pr=p['pr'], Pwf_test=p['pwf_test'], Qo_test=p['qo_test'], Pb=p['pb'],
+                    fe_old=p.get('fe_old', 1.0), fe_new=1.0, r_e=p.get('re', 1000.0), r_w=p.get('rw', 0.328), skin=p.get('skin', 0.0)
+                )
+            elif p.get('ipr_model', 'Vogel') == 'General IPR':
+                from ipr.general import general_ipr
+                from pvt.fluid_properties import bubblepoint_pressure, solution_gor, oil_volume_factor, live_oil_viscosity
+                pb_calc = bubblepoint_pressure(p['t_bh'], p['gor'], p['gas_sg'], p['oil_api'], pvt_correlation=p['pvt_correlation'])
+                pb = p['pb'] if abs(p['pb'] - pb_calc) / pb_calc < 0.5 else pb_calc
+                
+                rs_val = p['gor'] if p['pr'] >= pb else solution_gor(p['pr'], p['t_bh'], p['gas_sg'], p['oil_api'], pvt_correlation=p['pvt_correlation'])
+                bo_val = oil_volume_factor(p['pr'], p['t_bh'], rs_val, p['gas_sg'], p['oil_api'], pb=pb, pvt_correlation=p['pvt_correlation'], Rs_surface=p['gor'])
+                mu_o_val = live_oil_viscosity(p['t_bh'], p['oil_api'], rs_val, p=p['pr'], pb=pb, pvt_correlation=p['pvt_correlation'], Rs_surface=p['gor'], gas_sg=p['gas_sg'])
+                
+                ipr_p, ipr_q, Qmax, J = general_ipr(
+                    Pr=p['pr'], k=p.get('perm_k'), h=p.get('thick_h'), kro=p.get('kro', 1.0), 
+                    mu_o=mu_o_val, Bo=bo_val, re=p.get('re'), rw=p.get('rw'), skin=p.get('skin')
+                )
+            else:
+                from ipr.vogel import vogel_ipr
+                ipr_p, ipr_q, Qmax, J = vogel_ipr(Pr=p['pr'], Pwf_test=p['pwf_test'], Qo_test=p['qo_test'], Pb=p['pb'])
+                
+            # Step 9: Tubing Performance Curve (Limited)
+            from Gas_Lift_Design.const_whp_limited import generate_gl_vlp_curve_limited, compute_gl_traverse_limited
+            from engine.traverse import find_operating_point
+            
+            rate_max = min(Qmax * 1.2, 8000)
+            
+            perf_data = generate_gl_vlp_curve_limited(
+                p['qg_avail'], p['whp'], p['pinj'], p['inj_gas_sg'], p['valve_dp'], p['depth'], p['gor'],
+                p['t_surf'], p['t_bh'], p['wor'], p['gas_sg'], p['oil_api'], p['water_sg'],
+                p['tubing_id'], p['roughness'], p['vlp_model'], p['pvt_correlation'],
+                rate_min=50, rate_max=rate_max, n_rates=20
+            )
+            
+            vlp_rates = np.array([row['q_l'] for row in perf_data])
+            vlp_bhps = np.array([row['fbhp'] for row in perf_data])
+            
+            # Intersection of inflow and outflow
+            q_op, p_op = find_operating_point(vlp_rates, vlp_bhps, ipr_q, ipr_p)
+            
+            # Generate traverse exclusively for the finalized Operating Point
+            if q_op is not None and q_op > 0:
+                _, trav_t, trav_c, inj_depth = compute_gl_traverse_limited(
+                    q_op, p['qg_avail'], p['whp'], p['pinj'], p['inj_gas_sg'], p['valve_dp'], p['depth'], p['gor'],
+                    p['t_surf'], p['t_bh'], p['wor'], p['gas_sg'], p['oil_api'], p['water_sg'],
+                    p['tubing_id'], p['roughness'], p['vlp_model'], p['pvt_correlation']
+                )
+            else:
+                trav_t, trav_c, inj_depth = [], [], None
+                
+            self.finished.emit({
+                'ipr': (ipr_q, ipr_p),
+                'vlp': {'rates': vlp_rates, 'bhps': vlp_bhps, 'label': f"Limited GL VLP (Qg={p['qg_avail']:.0f} Mscf/d)"},
+                'op_point': (q_op, p_op),
+                'traverse_tubing': trav_t,
+                'traverse_casing': trav_c,
+                'inj_depth': inj_depth,
+                'perf_data': perf_data
+            })
+            
+        except Exception as e:
+            import traceback
+            self.error.emit(f"{e}\n{traceback.format_exc()}")
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -699,10 +778,57 @@ class MainWindow(QMainWindow):
         
         self.const_whp_subtabs.addTab(self.cw_unlim_tab, "Unlimited Supply")
 
-        # -- Sub-tab b: Limited Supply (Placeholder) --
+       # -- Sub-tab b: Limited Supply --
         self.cw_lim_tab = QWidget()
-        cw_lim_layout = QVBoxLayout(self.cw_lim_tab)
-        cw_lim_layout.addWidget(QLabel("Limited Supply Calculation Model Configuration Required"))
+        cw_lim_layout = QHBoxLayout(self.cw_lim_tab)
+        cw_lim_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.cw_l_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.cw_l_splitter.setStyleSheet(splitter_style)
+        
+        from ui.input_panel import GasLiftLimitedInputPanel
+        
+        self.cw_l_input = GasLiftLimitedInputPanel()
+        self.cw_l_input.setMinimumWidth(400)
+        self.cw_l_input.setMaximumWidth(400)
+        
+        self.cw_l_results_tabs = QTabWidget()
+        self.cw_l_results_tabs.setStyleSheet(inferior_style)
+        
+        # 1. Pressure Traverse Profile Tab
+        self.cw_l_plot_traverse = TraversePlotWidget()
+        self.cw_l_results_tabs.addTab(self.cw_l_plot_traverse, "Pressure Traverse Profile")
+        
+        # 2. IPR-VLP Output Tab
+        self.cw_l_plot_iprvlp = PlotWidget()
+        self.cw_l_results_tabs.addTab(self.cw_l_plot_iprvlp, "IPR-VLP Output")
+        
+        # 3. Gas Lift Performance Table Tab (Does not contain Optimum GLR column)
+        self.cw_l_table_tab = QWidget()
+        cw_l_table_layout = QVBoxLayout(self.cw_l_table_tab)
+        cw_l_table_layout.setContentsMargins(15, 15, 15, 15)
+        
+        self.cw_l_table = QTableWidget()
+        self.cw_l_table.setColumnCount(4)
+        self.cw_l_table.setHorizontalHeaderLabels([
+            "Liquid Rate (STB/d)", "Inj. Depth (ft)", "Available Gas Rate (Mscf/d)", "FBHP (psia)"
+        ])
+        self.cw_l_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.cw_l_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.cw_l_table.setAlternatingRowColors(True)
+        self.cw_l_table.setStyleSheet("""
+            QTableWidget { background-color: #FFFFFF; alternate-background-color: #FAFAFA; border: 1px solid #D4C3C3; }
+            QTableWidget::item:hover { background-color: #E8D0D0; color: #8B1E1E; }
+        """)
+        cw_l_table_layout.addWidget(self.cw_l_table)
+        self.cw_l_results_tabs.addTab(self.cw_l_table_tab, "GL Performance Table")
+        
+        self.cw_l_splitter.addWidget(self.cw_l_input)
+        self.cw_l_splitter.addWidget(self.cw_l_results_tabs)
+        self.cw_l_splitter.setCollapsible(0, False)
+        self.cw_l_splitter.setSizes([400, 920])
+        cw_lim_layout.addWidget(self.cw_l_splitter)
+        
         self.const_whp_subtabs.addTab(self.cw_lim_tab, "Limited Supply")
 
         const_whp_layout.addWidget(self.const_whp_subtabs)
@@ -752,8 +878,10 @@ class MainWindow(QMainWindow):
         self.gl_action_dropdown.currentIndexChanged.connect(self.gl_content_stack.setCurrentIndex)
         
         # --- ADD THIS MISSING LINE TO RESTORE FUNCTIONALITY ---
-        # Wire hooks for execution for Gas Lift (Constant WHP)
+        # Wire hooks for execution for Gas Lift (Constant WHP - unlimited)
         self.cw_u_input.run_requested.connect(self.run_cw_unlimited_analysis)
+        # Wire hooks for execution for Gas Lift (Constant WHP - limited)
+        self.cw_l_input.run_requested.connect(self.run_cw_limited_analysis)
         # ------------------------------------------------------
         
         # Status Bar Connections---------------------------------------------------------------
@@ -955,7 +1083,59 @@ class MainWindow(QMainWindow):
         self._cw_worker.finished.connect(self._cw_thread.quit)
         self._cw_worker.error.connect(self._cw_thread.quit)
         self._cw_thread.start()
-        # -------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------------
+    def run_cw_limited_analysis(self):
+        params = self.cw_l_input.get_values()
+        self.status.showMessage("Computing Limited Supply Gas Lift Evaluation… please wait")
+        self.cw_l_input.run_btn.setEnabled(False)
+
+        self._cw_l_thread = QThread()
+        self._cw_l_worker = GLLimitedWorker(params)
+        self._cw_l_worker.moveToThread(self._cw_l_thread)
+        self._cw_l_thread.started.connect(self._cw_l_worker.run)
+        
+        def on_done(res):
+            self.cw_l_input.run_btn.setEnabled(True)
+            self.cw_l_plot_iprvlp.plot(
+                ipr_data=res.get('ipr'),
+                vlp_curves=[res.get('vlp')],
+                op_point=res.get('op_point')
+            )
+            self.cw_l_plot_traverse.plot_traverse(
+                traverse_tubing=res.get('traverse_tubing'),
+                traverse_casing=res.get('traverse_casing'),
+                inj_depth=res.get('inj_depth'),
+                op_point=res.get('op_point')
+            )
+            
+            # Populate the transparency table
+            perf_data = res.get('perf_data', [])
+            self.cw_l_table.setRowCount(len(perf_data))
+            for i, row in enumerate(perf_data):
+                self.cw_l_table.setItem(i, 0, QTableWidgetItem(f"{row['q_l']:.0f}"))
+                self.cw_l_table.setItem(i, 1, QTableWidgetItem(f"{row['inj_depth']:.0f}"))
+                self.cw_l_table.setItem(i, 2, QTableWidgetItem(f"{row['inj_gas_rate']:.2f}"))
+                self.cw_l_table.setItem(i, 3, QTableWidgetItem(f"{row['fbhp']:.1f}"))
+                
+            q_op, p_op = res.get('op_point', (None, None))
+            if q_op:
+                self.status.showMessage(
+                    f"Limited GL Op. Point Found: Qo = {q_op:.0f} STB/d  |  Pwf = {p_op:.0f} psia  |  "
+                    f"Inj. Gas = {params['qg_avail']:.0f} Mscf/d  |  "
+                    f"Injection Depth = {res.get('inj_depth', 0):.0f} ft"
+                )
+            else:
+                self.status.showMessage("Analysis complete: No intersection found.")
+                
+        def on_err(msg):
+            self.cw_l_input.run_btn.setEnabled(True)
+            self.status.showMessage(f"Error: {msg}")
+
+        self._cw_l_worker.finished.connect(on_done)
+        self._cw_l_worker.error.connect(on_err)
+        self._cw_l_worker.finished.connect(self._cw_l_thread.quit)
+        self._cw_l_worker.error.connect(self._cw_l_thread.quit)
+        self._cw_l_thread.start()
     
     # --- NEW CODE FOR ISSUE 2 (Executing the run and handling data sync) -------------------------------
     def run_gaslift_iprvlp_analysis(self):

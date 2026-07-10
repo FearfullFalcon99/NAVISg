@@ -350,7 +350,7 @@ class GeneralInputPanel(BaseInputPanel):
         if "sens_min" in vals: self.sens_min.setValue(vals["sens_min"])
         if "sens_max" in vals: self.sens_max.setValue(vals["sens_max"])
         if "sens_steps" in vals: self.sens_steps.setValue(vals["sens_steps"])    
-    # ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------
     
 class GasLiftInputPanel(BaseInputPanel):
     def __init__(self, parent=None):
@@ -464,5 +464,42 @@ class GasLiftAdvancedInputPanel(GeneralInputPanel):
             "pinj": self.pinj.value(),
             "inj_gas_sg": self.inj_gas_sg.value(),
             "valve_dp": self.valve_dp.value()
+        })
+        return vals
+    
+class GasLiftLimitedInputPanel(GeneralInputPanel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("gasLiftLimitedInputPanel")
+        
+        # Inject Gas Lift Specifics Group Box for Limited constraint
+        gl_group = QGroupBox("Gas Lift Injection Parameters (Limited)")
+        gl_form = QFormLayout(gl_group)
+        self._style_form(gl_form)
+        
+        self.pinj = self._dbl(100, 10000, 1000, " psia")
+        self.inj_gas_sg = self._dbl(0.5, 1.5, 0.6, "", decimals=3)
+        self.valve_dp = self._dbl(0, 1000, 100, " psia")
+        self.qg_avail = self._dbl(10, 50000, 1000, " Mscf/d")
+        
+        gl_form.addRow("Surface Inj. Pressure", self.pinj)
+        gl_form.addRow("Inj. Gas Sp. Gravity", self.inj_gas_sg)
+        gl_form.addRow("Valve Differential (ΔP)", self.valve_dp)
+        gl_form.addRow("Available Gas Rate (Qg)", self.qg_avail)
+        
+        # Hide the general Sensitivity group and insert the GL properties in its slot
+        self.sens_group.setVisible(False)
+        self.content_layout.insertWidget(self.content_layout.indexOf(self.sens_group), gl_group)
+        
+        # Update Run Button
+        self.run_btn.setText("▶ Evaluate Gas Lift (Limited Supply)")
+
+    def get_values(self):
+        vals = super().get_values()
+        vals.update({
+            "pinj": self.pinj.value(),
+            "inj_gas_sg": self.inj_gas_sg.value(),
+            "valve_dp": self.valve_dp.value(),
+            "qg_avail": self.qg_avail.value()
         })
         return vals
