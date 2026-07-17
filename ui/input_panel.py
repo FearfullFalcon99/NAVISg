@@ -404,99 +404,80 @@ class GasLiftInputPanel(BaseInputPanel):
             "target_glr": self.target_glr.value()
         }
         
-class GasLiftIprVlpInputPanel(GeneralInputPanel):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("gasLiftIprVlpInputPanel")
-        
-        # New Elegant Window Frame for User Choice
-        self.choice_group = QGroupBox("Data Source Configuration")
-        self.choice_group.setStyleSheet("""
-            QGroupBox { background-color: #F0E8E8; border: 1px solid #8B1E1E; }
-            QRadioButton { color: #8B1E1E; font-weight: bold; }
-        """)
-        choice_layout = QVBoxLayout(self.choice_group)
-        
-        # --- MODIFIED: Adjusted string for elegant wrapping ---
-        self.btn_carry = QRadioButton("Carry forward previously entered values\n(from General Input)")
-        self.btn_fresh = QRadioButton("Enter New / Fresh values")
-        self.btn_carry.setChecked(True)
-        # ------------------------------------------------------
-        
-        choice_layout.addWidget(self.btn_carry)
-        choice_layout.addWidget(self.btn_fresh)
-        
-        # Inject choice block directly at the top of the inherited layout
-        self.content_layout.insertWidget(0, self.choice_group)
-        self.run_btn.setText("▶ Evaluate New IPR-VLP")
-        
-
 # Constant WHP Panel ----------------------------------------------------------------
 
-class GasLiftAdvancedInputPanel(GeneralInputPanel):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("gasLiftAdvancedInputPanel")
-        
-        # Inject Gas Lift Specifics Group Box
-        gl_group = QGroupBox("Gas Lift Injection Parameters")
-        gl_form = QFormLayout(gl_group)
-        self._style_form(gl_form)
-        
-        self.pinj = self._dbl(100, 10000, 1000, " psia")
-        self.inj_gas_sg = self._dbl(0.5, 1.5, 0.6, "", decimals=3)
-        self.valve_dp = self._dbl(0, 1000, 100, " psia")
-        
-        gl_form.addRow("Surface Inj. Pressure", self.pinj)
-        gl_form.addRow("Inj. Gas Sp. Gravity", self.inj_gas_sg)
-        gl_form.addRow("Valve Differential (\u0394P)", self.valve_dp)
-        
-        # --- NEW LOGIC: Hide Sensitivity and replace its spatial slot ---
-        self.sens_group.setVisible(False)
-        self.content_layout.insertWidget(self.content_layout.indexOf(self.sens_group), gl_group)
-        
-        # Update Run Button Title
-        self.run_btn.setText("▶ Evaluate Gas Lift (Constant WHP)")
+class GasLiftDesignInputPanel(GeneralInputPanel):
+    # Custom signal to notify the main window that data transfer is requested
+    pull_requested = Signal() 
 
-    def get_values(self):
-        vals = super().get_values()
-        vals.update({
-            "pinj": self.pinj.value(),
-            "inj_gas_sg": self.inj_gas_sg.value(),
-            "valve_dp": self.valve_dp.value()
-        })
-        return vals
-    
-class GasLiftLimitedInputPanel(GeneralInputPanel):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("gasLiftLimitedInputPanel")
+        self.setObjectName("gasLiftDesignInputPanel")
         
-        # Inject Gas Lift Specifics Group Box for Limited constraint
-        gl_group = QGroupBox("Gas Lift Injection Parameters (Limited)")
-        gl_form = QFormLayout(gl_group)
-        self._style_form(gl_form)
+        # --- NEW: Carry Forward Button ---
+        self.btn_carry_forward = QPushButton("⟳ Carry Forward General Inputs")
+        self.btn_carry_forward.setToolTip("Pull the current values from the General Production Evaluation tab.")
+        self.btn_carry_forward.setStyleSheet("""
+            QPushButton {
+                background-color: #F0E8E8; color: #8B1E1E; font-size: 13px; font-weight: bold;
+                padding: 8px; border: 1px solid #D4C3C3; border-radius: 6px; margin-bottom: 8px;
+            }
+            QPushButton:hover { background-color: #E8D0D0; }
+            QPushButton:pressed { background-color: #D4C3C3; }
+        """)
+        self.btn_carry_forward.clicked.connect(self.pull_requested.emit)
+        
+        # Insert the button at the very top of the scrollable layout (index 0)
+        self.content_layout.insertWidget(0, self.btn_carry_forward)
+        # ---------------------------------
+
+        # Inject Gas Lift Specifics Group Box
+        self.gl_group = QGroupBox("Gas Lift Injection Parameters")
+        self.gl_form = QFormLayout(self.gl_group)
+        self._style_form(self.gl_form)
+        
+        self.supply_type = self._disable_scroll(QComboBox())
+        self.supply_type.addItems(["Unlimited", "Limited"])
         
         self.pinj = self._dbl(100, 10000, 1000, " psia")
         self.inj_gas_sg = self._dbl(0.5, 1.5, 0.6, "", decimals=3)
         self.valve_dp = self._dbl(0, 1000, 100, " psia")
         self.qg_avail = self._dbl(10, 50000, 1000, " Mscf/d")
         
-        gl_form.addRow("Surface Inj. Pressure", self.pinj)
-        gl_form.addRow("Inj. Gas Sp. Gravity", self.inj_gas_sg)
-        gl_form.addRow("Valve Differential (ΔP)", self.valve_dp)
-        gl_form.addRow("Available Gas Rate (Qg)", self.qg_avail)
+        self.gl_form.addRow("Supply Range", self.supply_type)
+        self.gl_form.addRow("Surface Inj. Pressure", self.pinj)
+        self.gl_form.addRow("Inj. Gas Sp. Gravity", self.inj_gas_sg)
+        self.gl_form.addRow("Valve Differential (ΔP)", self.valve_dp)
+        self.gl_form.addRow("Available Gas Rate (Qg)", self.qg_avail)
         
-        # Hide the general Sensitivity group and insert the GL properties in its slot
+        # Hide Sensitivity and replace its spatial slot
         self.sens_group.setVisible(False)
-        self.content_layout.insertWidget(self.content_layout.indexOf(self.sens_group), gl_group)
+        self.content_layout.insertWidget(self.content_layout.indexOf(self.sens_group), self.gl_group)
         
-        # Update Run Button
-        self.run_btn.setText("▶ Evaluate Gas Lift (Limited Supply)")
+        # Connect the dropdown to the dynamic toggle logic
+        self.supply_type.currentTextChanged.connect(self._toggle_supply_fields)
+        self._toggle_supply_fields() # Trigger immediately to set initial state
+
+    def _toggle_supply_fields(self):
+        """Dynamically shows/hides QFormLayout rows based on the Supply Range."""
+        is_limited = self.supply_type.currentText() == "Limited"
+        
+        # Toggle visibility for both the widget and its label
+        self.qg_avail.setVisible(is_limited)
+        label = self.gl_form.labelForField(self.qg_avail)
+        if label:
+            label.setVisible(is_limited)
+            
+        # Update Run Button Title
+        if is_limited:
+            self.run_btn.setText("▶ Evaluate Gas Lift (Limited Supply)")
+        else:
+            self.run_btn.setText("▶ Evaluate Gas Lift (Unlimited Supply)")
 
     def get_values(self):
         vals = super().get_values()
         vals.update({
+            "supply_type": self.supply_type.currentText(),
             "pinj": self.pinj.value(),
             "inj_gas_sg": self.inj_gas_sg.value(),
             "valve_dp": self.valve_dp.value(),

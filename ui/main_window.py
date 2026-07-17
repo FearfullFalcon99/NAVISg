@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QObject
 
 from Gas_Lift_Design.const_whp_unlimited import compute_gl_traverse_unlimited, find_optimum_glr, generate_gl_vlp_curve
-from ui.input_panel import GeneralInputPanel, GasLiftInputPanel, GasLiftIprVlpInputPanel, _asset_path
+from ui.input_panel import GeneralInputPanel, GasLiftInputPanel, _asset_path
 from ui.pvt_plots_widget import PVTPlotsWidget
 from ui.plot_widget import PlotWidget
 from ipr.standing import standing_ipr
@@ -696,14 +696,14 @@ class MainWindow(QMainWindow):
         gl_header_layout.addWidget(QLabel("Perform:"))
         
         self.gl_action_dropdown = QComboBox()
+        # Update the dropdown items
         self.gl_action_dropdown.addItems([
-            "Gas Lift Design at Constant WHP",
-            "Gas Lift Design at Variable WHP",
+            "Gas Lift Design",
             "GLV Unloading",
             "Design Optimisation"
         ])
         gl_header_layout.addWidget(self.gl_action_dropdown)
-        gl_header_layout.addStretch() # Pushes all remaining whitespace to the right
+        gl_header_layout.addStretch() 
         
         gl_layout.addWidget(self.gl_header)
 
@@ -716,145 +716,74 @@ class MainWindow(QMainWindow):
             QSplitter::handle:horizontal { width: 4px; }
         """
 
-        # ================= STACK INDEX 0: Constant WHP =================
-        self.const_whp_tab = QWidget()
-        const_whp_layout = QVBoxLayout(self.const_whp_tab)
-        const_whp_layout.setContentsMargins(0, 0, 0, 0)
-        self.const_whp_subtabs = QTabWidget()
-        self.const_whp_subtabs.setStyleSheet(inferior_style)
+        # ================= STACK INDEX 0: Gas Lift Design =================
+        self.gl_design_tab = QWidget()
+        gl_design_layout = QVBoxLayout(self.gl_design_tab)
+        gl_design_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.gl_design_subtabs = QTabWidget()
+        self.gl_design_subtabs.setStyleSheet(inferior_style)
 
-        # -- Sub-tab a: Unlimited Supply --
-        self.cw_unlim_tab = QWidget()
-        cw_unlim_layout = QHBoxLayout(self.cw_unlim_tab)
-        cw_unlim_layout.setContentsMargins(0, 0, 0, 0)
+        # -- Sub-tab a: Constant WHP --
+        self.cw_tab = QWidget()
+        cw_layout = QHBoxLayout(self.cw_tab)
+        cw_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.cw_u_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.cw_u_splitter.setStyleSheet(splitter_style)
+        self.cw_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.cw_splitter.setStyleSheet(splitter_style)
         
-        from ui.input_panel import GasLiftAdvancedInputPanel
+        from ui.input_panel import GasLiftDesignInputPanel
         from ui.plot_widget import TraversePlotWidget
         
-        self.cw_u_input = GasLiftAdvancedInputPanel()
-        self.cw_u_input.setMinimumWidth(400)
-        self.cw_u_input.setMaximumWidth(400)
+        self.cw_input = GasLiftDesignInputPanel()
+        self.cw_input.setMinimumWidth(400)
+        self.cw_input.setMaximumWidth(400)
+        # --- NEW: Wire the carry forward signal ---
+        self.cw_input.pull_requested.connect(self.sync_general_to_gas_lift)
+        # ------------------------------------------
         
-        self.cw_u_results_tabs = QTabWidget()
-        self.cw_u_results_tabs.setStyleSheet(inferior_style)
+        self.cw_results_tabs = QTabWidget()
+        self.cw_results_tabs.setStyleSheet(inferior_style)
         
-        # 1. Pressure Traverse Profile Tab (Prioritized First)
-        self.cw_u_plot_traverse = TraversePlotWidget()
-        self.cw_u_results_tabs.addTab(self.cw_u_plot_traverse, "Pressure Traverse Profile")
+        self.cw_plot_traverse = TraversePlotWidget()
+        self.cw_results_tabs.addTab(self.cw_plot_traverse, "Pressure Traverse Profile")
         
-        # 2. IPR-VLP Output Tab
-        self.cw_u_plot_iprvlp = PlotWidget()
-        self.cw_u_results_tabs.addTab(self.cw_u_plot_iprvlp, "IPR-VLP Output")
+        self.cw_plot_iprvlp = PlotWidget()
+        self.cw_results_tabs.addTab(self.cw_plot_iprvlp, "IPR-VLP Output")
         
-        # 3. Gas Lift Performance Table Tab (Transparency Checkpoint)
-        self.cw_u_table_tab = QWidget()
-        cw_u_table_layout = QVBoxLayout(self.cw_u_table_tab)
-        cw_u_table_layout.setContentsMargins(15, 15, 15, 15)
+        self.cw_table_tab = QWidget()
+        cw_table_layout = QVBoxLayout(self.cw_table_tab)
+        cw_table_layout.setContentsMargins(15, 15, 15, 15)
         
-        self.cw_u_table = QTableWidget()
-        self.cw_u_table.setColumnCount(5)
-        self.cw_u_table.setHorizontalHeaderLabels([
-            "Liquid Rate (STB/d)", "Optimum GLR (scf/STB)", 
-            "Inj. Depth (ft)", "Inj. Gas Rate (Mscf/d)", "FBHP (psia)"
-        ])
-        self.cw_u_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.cw_u_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.cw_u_table.setAlternatingRowColors(True)
-        self.cw_u_table.setStyleSheet("""
+        self.cw_table = QTableWidget()
+        self.cw_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.cw_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.cw_table.setAlternatingRowColors(True)
+        self.cw_table.setStyleSheet("""
             QTableWidget { background-color: #FFFFFF; alternate-background-color: #FAFAFA; border: 1px solid #D4C3C3; }
             QTableWidget::item:hover { background-color: #E8D0D0; color: #8B1E1E; }
         """)
-        cw_u_table_layout.addWidget(self.cw_u_table)
-        self.cw_u_results_tabs.addTab(self.cw_u_table_tab, "GL Performance Table")
+        cw_table_layout.addWidget(self.cw_table)
+        self.cw_results_tabs.addTab(self.cw_table_tab, "GL Performance Table")
         
-        self.cw_u_splitter.addWidget(self.cw_u_input)
-        self.cw_u_splitter.addWidget(self.cw_u_results_tabs)
-        self.cw_u_splitter.setCollapsible(0, False)
-        self.cw_u_splitter.setSizes([400, 920])
-        cw_unlim_layout.addWidget(self.cw_u_splitter)
+        self.cw_splitter.addWidget(self.cw_input)
+        self.cw_splitter.addWidget(self.cw_results_tabs)
+        self.cw_splitter.setCollapsible(0, False)
+        self.cw_splitter.setSizes([400, 920])
+        cw_layout.addWidget(self.cw_splitter)
         
-        self.const_whp_subtabs.addTab(self.cw_unlim_tab, "Unlimited Supply")
+        self.gl_design_subtabs.addTab(self.cw_tab, "Constant WHP")
 
-       # -- Sub-tab b: Limited Supply --
-        self.cw_lim_tab = QWidget()
-        cw_lim_layout = QHBoxLayout(self.cw_lim_tab)
-        cw_lim_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.cw_l_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.cw_l_splitter.setStyleSheet(splitter_style)
-        
-        from ui.input_panel import GasLiftLimitedInputPanel
-        
-        self.cw_l_input = GasLiftLimitedInputPanel()
-        self.cw_l_input.setMinimumWidth(400)
-        self.cw_l_input.setMaximumWidth(400)
-        
-        self.cw_l_results_tabs = QTabWidget()
-        self.cw_l_results_tabs.setStyleSheet(inferior_style)
-        
-        # 1. Pressure Traverse Profile Tab
-        self.cw_l_plot_traverse = TraversePlotWidget()
-        self.cw_l_results_tabs.addTab(self.cw_l_plot_traverse, "Pressure Traverse Profile")
-        
-        # 2. IPR-VLP Output Tab
-        self.cw_l_plot_iprvlp = PlotWidget()
-        self.cw_l_results_tabs.addTab(self.cw_l_plot_iprvlp, "IPR-VLP Output")
-        
-        # 3. Gas Lift Performance Table Tab (Does not contain Optimum GLR column)
-        self.cw_l_table_tab = QWidget()
-        cw_l_table_layout = QVBoxLayout(self.cw_l_table_tab)
-        cw_l_table_layout.setContentsMargins(15, 15, 15, 15)
-        
-        self.cw_l_table = QTableWidget()
-        self.cw_l_table.setColumnCount(4)
-        self.cw_l_table.setHorizontalHeaderLabels([
-            "Liquid Rate (STB/d)", "Inj. Depth (ft)", "Available Gas Rate (Mscf/d)", "FBHP (psia)"
-        ])
-        self.cw_l_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.cw_l_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.cw_l_table.setAlternatingRowColors(True)
-        self.cw_l_table.setStyleSheet("""
-            QTableWidget { background-color: #FFFFFF; alternate-background-color: #FAFAFA; border: 1px solid #D4C3C3; }
-            QTableWidget::item:hover { background-color: #E8D0D0; color: #8B1E1E; }
-        """)
-        cw_l_table_layout.addWidget(self.cw_l_table)
-        self.cw_l_results_tabs.addTab(self.cw_l_table_tab, "GL Performance Table")
-        
-        self.cw_l_splitter.addWidget(self.cw_l_input)
-        self.cw_l_splitter.addWidget(self.cw_l_results_tabs)
-        self.cw_l_splitter.setCollapsible(0, False)
-        self.cw_l_splitter.setSizes([400, 920])
-        cw_lim_layout.addWidget(self.cw_l_splitter)
-        
-        self.const_whp_subtabs.addTab(self.cw_lim_tab, "Limited Supply")
+        # -- Sub-tab b: Variable WHP --
+        self.vw_tab = QWidget()
+        vw_layout = QVBoxLayout(self.vw_tab)
+        vw_layout.addWidget(QLabel("Variable WHP Configuration Required"))
+        self.gl_design_subtabs.addTab(self.vw_tab, "Variable WHP")
 
-        const_whp_layout.addWidget(self.const_whp_subtabs)
-        self.gl_content_stack.addWidget(self.const_whp_tab)
+        gl_design_layout.addWidget(self.gl_design_subtabs)
+        self.gl_content_stack.addWidget(self.gl_design_tab)
 
-        # ================= STACK INDEX 1: Variable WHP =================
-        self.var_whp_tab = QWidget()
-        var_whp_layout = QVBoxLayout(self.var_whp_tab)
-        var_whp_layout.setContentsMargins(0, 0, 0, 0)
-        self.var_whp_subtabs = QTabWidget()
-        self.var_whp_subtabs.setStyleSheet(inferior_style)
-        
-        self.vw_unlim_tab = QWidget()
-        vw_unlim_layout = QVBoxLayout(self.vw_unlim_tab)
-        vw_unlim_layout.addWidget(QLabel("Variable WHP (Unlimited) Configuration Required"))
-        self.var_whp_subtabs.addTab(self.vw_unlim_tab, "Unlimited Supply")
-        
-        self.vw_lim_tab = QWidget()
-        vw_lim_layout = QVBoxLayout(self.vw_lim_tab)
-        vw_lim_layout.addWidget(QLabel("Variable WHP (Limited) Configuration Required"))
-        self.var_whp_subtabs.addTab(self.vw_lim_tab, "Limited Supply")
-        
-        var_whp_layout.addWidget(self.var_whp_subtabs)
-        self.gl_content_stack.addWidget(self.var_whp_tab)
-
-        # ================= STACK INDEX 2: GLV Unloading =================
+        # ================= STACK INDEX 1: GLV Unloading =================
         self.glv_tab = QWidget()
         glv_layout = QVBoxLayout(self.glv_tab)
         glv_lbl = QLabel("GLV Unloading Environment Configuration Required")
@@ -863,7 +792,7 @@ class MainWindow(QMainWindow):
         glv_layout.addWidget(glv_lbl)
         self.gl_content_stack.addWidget(self.glv_tab)
 
-        # ================= STACK INDEX 3: Design Optimisation =================
+        # ================= STACK INDEX 2: Design Optimisation =================
         self.opt_tab = QWidget()
         opt_layout = QVBoxLayout(self.opt_tab)
         opt_lbl = QLabel("Design Optimisation Environment Configuration Required")
@@ -877,12 +806,8 @@ class MainWindow(QMainWindow):
         # Connect Dropdown to Stacked Widget View Switcher
         self.gl_action_dropdown.currentIndexChanged.connect(self.gl_content_stack.setCurrentIndex)
         
-        # --- ADD THIS MISSING LINE TO RESTORE FUNCTIONALITY ---
-        # Wire hooks for execution for Gas Lift (Constant WHP - unlimited)
-        self.cw_u_input.run_requested.connect(self.run_cw_unlimited_analysis)
-        # Wire hooks for execution for Gas Lift (Constant WHP - limited)
-        self.cw_l_input.run_requested.connect(self.run_cw_limited_analysis)
-        # ------------------------------------------------------
+        # Wire hooks for execution for Gas Lift Design (Constant WHP)
+        self.cw_input.run_requested.connect(self.run_cw_analysis)
         
         # Status Bar Connections---------------------------------------------------------------
         self.status = QStatusBar()
@@ -1028,54 +953,80 @@ class MainWindow(QMainWindow):
         self._worker.error.connect(self._thread.quit)
         self._thread.start()
 
-    # New Constant WHP Model (Unlimited Gas Injection) -------------------------------
+    # New Constant WHP Model (Both Gas Injections) -------------------------------
 
-    def run_cw_unlimited_analysis(self):
-        params = self.cw_u_input.get_values()
+    def run_cw_analysis(self):
+        params = self.cw_input.get_values()
+        is_limited = params["supply_type"] == "Limited"
+        
         self.status.showMessage("Computing Constant WHP Gas Lift Evaluation… please wait")
-        self.cw_u_input.run_btn.setEnabled(False)
+        self.cw_input.run_btn.setEnabled(False)
 
         self._cw_thread = QThread()
-        self._cw_worker = GLAdvancedWorker(params)
+        
+        # Dispatch to the correct worker based on supply type
+        if is_limited:
+            self._cw_worker = GLLimitedWorker(params)
+        else:
+            self._cw_worker = GLAdvancedWorker(params)
+            
         self._cw_worker.moveToThread(self._cw_thread)
         self._cw_thread.started.connect(self._cw_worker.run)
         
         def on_done(res):
-            self.cw_u_input.run_btn.setEnabled(True)
-            self.cw_u_plot_iprvlp.plot(
+            self.cw_input.run_btn.setEnabled(True)
+            self.cw_plot_iprvlp.plot(
                 ipr_data=res.get('ipr'),
                 vlp_curves=[res.get('vlp')],
                 op_point=res.get('op_point')
             )
-            self.cw_u_plot_traverse.plot_traverse(
+            self.cw_plot_traverse.plot_traverse(
                 traverse_tubing=res.get('traverse_tubing'),
                 traverse_casing=res.get('traverse_casing'),
                 inj_depth=res.get('inj_depth'),
                 op_point=res.get('op_point')
             )
             
-            # Populate the transparency table
+            # Dynamically set table columns based on supply type
             perf_data = res.get('perf_data', [])
-            self.cw_u_table.setRowCount(len(perf_data))
-            for i, row in enumerate(perf_data):
-                self.cw_u_table.setItem(i, 0, QTableWidgetItem(f"{row['q_l']:.0f}"))
-                self.cw_u_table.setItem(i, 1, QTableWidgetItem(f"{row['opt_glr']:.0f}"))
-                self.cw_u_table.setItem(i, 2, QTableWidgetItem(f"{row['inj_depth']:.0f}"))
-                self.cw_u_table.setItem(i, 3, QTableWidgetItem(f"{row['inj_gas_rate']:.2f}"))
-                self.cw_u_table.setItem(i, 4, QTableWidgetItem(f"{row['fbhp']:.1f}"))
+            self.cw_table.setRowCount(len(perf_data))
+            
+            if is_limited:
+                self.cw_table.setColumnCount(4)
+                self.cw_table.setHorizontalHeaderLabels([
+                    "Liquid Rate (STB/d)", "Inj. Depth (ft)", "Available Gas Rate (Mscf/d)", "FBHP (psia)"
+                ])
+                for i, row in enumerate(perf_data):
+                    self.cw_table.setItem(i, 0, QTableWidgetItem(f"{row['q_l']:.0f}"))
+                    self.cw_table.setItem(i, 1, QTableWidgetItem(f"{row['inj_depth']:.0f}"))
+                    self.cw_table.setItem(i, 2, QTableWidgetItem(f"{row['inj_gas_rate']:.2f}"))
+                    self.cw_table.setItem(i, 3, QTableWidgetItem(f"{row['fbhp']:.1f}"))
+            else:
+                self.cw_table.setColumnCount(5)
+                self.cw_table.setHorizontalHeaderLabels([
+                    "Liquid Rate (STB/d)", "Optimum GLR (scf/STB)", 
+                    "Inj. Depth (ft)", "Inj. Gas Rate (Mscf/d)", "FBHP (psia)"
+                ])
+                for i, row in enumerate(perf_data):
+                    self.cw_table.setItem(i, 0, QTableWidgetItem(f"{row['q_l']:.0f}"))
+                    self.cw_table.setItem(i, 1, QTableWidgetItem(f"{row['opt_glr']:.0f}"))
+                    self.cw_table.setItem(i, 2, QTableWidgetItem(f"{row['inj_depth']:.0f}"))
+                    self.cw_table.setItem(i, 3, QTableWidgetItem(f"{row['inj_gas_rate']:.2f}"))
+                    self.cw_table.setItem(i, 4, QTableWidgetItem(f"{row['fbhp']:.1f}"))
                 
             q_op, p_op = res.get('op_point', (None, None))
             if q_op:
+                opt_glr_text = f"  |  Optimum GLR = {(res.get('opt_glr') or 0):.0f} scf/STB" if not is_limited else f"  |  Inj. Gas = {params['qg_avail']:.0f} Mscf/d"
                 self.status.showMessage(
-                    f"Gas Lift Op. Point Found: Qo = {q_op:.0f} STB/d  |  Pwf = {p_op:.0f} psia  |  "
-                    f"Optimum GLR = {(res.get('opt_glr') or 0):.0f} scf/STB  |  "
-                    f"Injection Depth = {(res.get('inj_depth') or 0):.0f} ft"
+                    f"Gas Lift Op. Point Found: Qo = {q_op:.0f} STB/d  |  Pwf = {p_op:.0f} psia"
+                    + opt_glr_text +
+                    f"  |  Injection Depth = {(res.get('inj_depth') or 0):.0f} ft"
                 )
             else:
                 self.status.showMessage("Analysis complete: No intersection found.")
                 
         def on_err(msg):
-            self.cw_u_input.run_btn.setEnabled(True)
+            self.cw_input.run_btn.setEnabled(True)
             self.status.showMessage(f"Error: {msg}")
 
         self._cw_worker.finished.connect(on_done)
@@ -1083,59 +1034,17 @@ class MainWindow(QMainWindow):
         self._cw_worker.finished.connect(self._cw_thread.quit)
         self._cw_worker.error.connect(self._cw_thread.quit)
         self._cw_thread.start()
-    # -------------------------------------------------------------------------------
-    def run_cw_limited_analysis(self):
-        params = self.cw_l_input.get_values()
-        self.status.showMessage("Computing Limited Supply Gas Lift Evaluation… please wait")
-        self.cw_l_input.run_btn.setEnabled(False)
-
-        self._cw_l_thread = QThread()
-        self._cw_l_worker = GLLimitedWorker(params)
-        self._cw_l_worker.moveToThread(self._cw_l_thread)
-        self._cw_l_thread.started.connect(self._cw_l_worker.run)
+    
+    def sync_general_to_gas_lift(self):
+        """Pulls values from the General Evaluation panel and populates the Gas Lift panel."""
+        # 1. Fetch current dictionary of values from the General tab
+        gen_vals = self.gen_input_panel.get_values()
         
-        def on_done(res):
-            self.cw_l_input.run_btn.setEnabled(True)
-            self.cw_l_plot_iprvlp.plot(
-                ipr_data=res.get('ipr'),
-                vlp_curves=[res.get('vlp')],
-                op_point=res.get('op_point')
-            )
-            self.cw_l_plot_traverse.plot_traverse(
-                traverse_tubing=res.get('traverse_tubing'),
-                traverse_casing=res.get('traverse_casing'),
-                inj_depth=res.get('inj_depth'),
-                op_point=res.get('op_point')
-            )
-            
-            # Populate the transparency table
-            perf_data = res.get('perf_data', [])
-            self.cw_l_table.setRowCount(len(perf_data))
-            for i, row in enumerate(perf_data):
-                self.cw_l_table.setItem(i, 0, QTableWidgetItem(f"{row['q_l']:.0f}"))
-                self.cw_l_table.setItem(i, 1, QTableWidgetItem(f"{row['inj_depth']:.0f}"))
-                self.cw_l_table.setItem(i, 2, QTableWidgetItem(f"{row['inj_gas_rate']:.2f}"))
-                self.cw_l_table.setItem(i, 3, QTableWidgetItem(f"{row['fbhp']:.1f}"))
-                
-            q_op, p_op = res.get('op_point', (None, None))
-            if q_op:
-                self.status.showMessage(
-                    f"Limited GL Op. Point Found: Qo = {q_op:.0f} STB/d  |  Pwf = {p_op:.0f} psia  |  "
-                    f"Inj. Gas = {params['qg_avail']:.0f} Mscf/d  |  "
-                    f"Injection Depth = {(res.get('inj_depth') or 0):.0f} ft"
-                )
-            else:
-                self.status.showMessage("Analysis complete: No intersection found.")
-                
-        def on_err(msg):
-            self.cw_l_input.run_btn.setEnabled(True)
-            self.status.showMessage(f"Error: {msg}")
-
-        self._cw_l_worker.finished.connect(on_done)
-        self._cw_l_worker.error.connect(on_err)
-        self._cw_l_worker.finished.connect(self._cw_l_thread.quit)
-        self._cw_l_worker.error.connect(self._cw_l_thread.quit)
-        self._cw_l_thread.start()
+        # 2. Push the values to the Gas Lift panel (overwriting matching keys)
+        self.cw_input.set_values(gen_vals)
+        
+        # 3. Notify the user via the Status Bar
+        self.status.showMessage("General inputs successfully carried forward. You may now modify them as needed.")
     
     # --- NEW CODE FOR ISSUE 2 (Executing the run and handling data sync) -------------------------------
     def run_gaslift_iprvlp_analysis(self):
