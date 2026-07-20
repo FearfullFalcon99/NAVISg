@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QObject
 
 from Gas_Lift_Design.const_whp_unlimited import compute_gl_traverse_unlimited, find_optimum_glr, generate_gl_vlp_curve
-from ui.input_panel import GeneralInputPanel, GasLiftInputPanel, _asset_path
+from ui.input_panel import GeneralInputPanel, GasLiftInputPanel, _asset_path, FutureIPRInputPanel
 from ui.pvt_plots_widget import PVTPlotsWidget
 from ui.plot_widget import PlotWidget
 from ipr.standing import standing_ipr
@@ -73,6 +73,11 @@ class Worker(QObject):
                 ipr_p, ipr_q, Qmax, J = general_ipr(
                     Pr=p['pr'], k=p.get('perm_k'), h=p.get('thick_h'), kro=p.get('kro', 1.0), 
                     mu_o=mu_o_val, Bo=bo_val, re=p.get('re'), rw=p.get('rw'), skin=p.get('skin')
+                )
+            elif p.get('ipr_model') == 'Wiggins':
+                from ipr.wiggins import wiggins_ipr
+                ipr_p, ipr_q, Qmax, J = wiggins_ipr(
+                    Pr=p['pr'], Pwf_test=p['pwf_test'], Qo_test=p['qo_test'],wc_pct=p['wor']
                 )
             else:
                 ipr_p, ipr_q, Qmax, J = vogel_ipr(
@@ -388,6 +393,74 @@ class GLLimitedWorker(QObject):
         except Exception as e:
             import traceback
             self.error.emit(f"{e}\n{traceback.format_exc()}")
+            
+class FutureIPRWorker(QObject):
+    finished = Signal(dict)
+    error = Signal(str)
+
+    def __init__(self, params):
+        super().__init__()
+        self.p = params
+
+    def run(self):
+        try:
+            from ipr.vogel import vogel_future_ipr, vogel_ipr
+            from ipr.wiggins import wiggins_future_ipr, wiggins_ipr
+            from engine.traverse import compute_vlp_curve, find_operating_point
+            
+            fut_p = self.p['future']
+            gen_p = self.p['general']
+            
+            # 1 & 2. Evaluate Future and Current IPR based on selected Model
+            if fut_p.get('ipr_model') == 'Wiggins':
+                # Evaluate Future IPR
+                fut_pres, fut_rates, Qmax_f, _ = wiggins_future_ipr(
+                    Pr_p=fut_p['pr_p'], Pwf_test=fut_p['pwf_test'], 
+                    Qo_test=fut_p['qo_test'], Pr_f=fut_p['pr_f'],
+                    wc_pct=gen_p['wor']
+                )
+                # Evaluate Current IPR 
+                curr_pres, curr_rates, Qmax_p, _ = wiggins_ipr(
+                    Pr=fut_p['pr_p'], Pwf_test=fut_p['pwf_test'], Qo_test=fut_p['qo_test'], wc_pct=gen_p['wor']
+                )
+            else:
+                # Default to Vogel
+                fut_pres, fut_rates, Qmax_f, _ = vogel_future_ipr(
+                    Pr_p=fut_p['pr_p'], Pwf_test=fut_p['pwf_test'], 
+                    Qo_test=fut_p['qo_test'], Pb=fut_p['pb'],
+                    Pr_f=fut_p['pr_f'], method=fut_p['method']
+                )
+                curr_pres, curr_rates, Qmax_p, _ = vogel_ipr(
+                    Pr=fut_p['pr_p'], Pwf_test=fut_p['pwf_test'], 
+                    Qo_test=fut_p['qo_test'], Pb=fut_p['pb']
+                )
+            
+            # 3. Evaluate Current VLP Curve
+            rate_max = min(Qmax_p * 1.2, 8000)
+            base_rates, base_bhps = compute_vlp_curve(
+                whp=gen_p['whp'], well_depth=gen_p['depth'], T_surf=gen_p['t_surf'],
+                T_bh=gen_p['t_bh'], wor=gen_p['wor'], gor=gen_p['gor'], gas_sg=gen_p['gas_sg'],
+                oil_api=gen_p['oil_api'], water_sg=gen_p['water_sg'], tubing_id=gen_p['tubing_id'],
+                roughness=gen_p['roughness'], vlp_model=gen_p['vlp_model'],
+                inclination_deg=gen_p['inclination_deg'], rate_min=20,
+                rate_max=rate_max, n_rates=40, pvt_correlation=gen_p['pvt_correlation']
+            )
+            
+            # 4. Intersection: Future Operating Point
+            q_op_fut, p_op_fut = find_operating_point(base_rates, base_bhps, fut_rates, fut_pres)
+            
+            self.finished.emit({
+                'ipr': (fut_rates, fut_pres), # Sent as primary curve
+                'current_ipr': {'rates': curr_rates, 'bhps': curr_pres, 'label': 'Current IPR'},
+                'current_vlp': {'rates': base_rates, 'bhps': base_bhps, 'label': f"Current VLP ({gen_p['vlp_model']})"},
+                'op_point': (q_op_fut, p_op_fut),
+                'Qmax_f': Qmax_f,
+                'pr_f': fut_p['pr_f']
+            })
+            
+        except Exception as e:
+            import traceback
+            self.error.emit(f"{e}\n{traceback.format_exc()}")
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -625,11 +698,26 @@ class MainWindow(QMainWindow):
         
         # --- Sub-tab b: Future IPR (Placeholder) ---
         self.future_ipr_tab = QWidget()
-        future_layout = QVBoxLayout(self.future_ipr_tab)
-        future_placeholder = QLabel("Future IPR Calculation Model Configuration Required")
-        future_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        future_placeholder.setStyleSheet("color: #8B1E1E; font-size: 14px; font-weight: bold;")
-        future_layout.addWidget(future_placeholder)
+        future_layout = QHBoxLayout(self.future_ipr_tab)
+        future_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.future_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.future_splitter.setStyleSheet(self.gen_splitter.styleSheet())
+        
+        self.future_input = FutureIPRInputPanel()
+        self.future_input.setMinimumWidth(400)
+        self.future_input.setMaximumWidth(400)
+        self.future_input.pull_requested.connect(self.sync_current_to_future_ipr)
+        self.future_input.run_requested.connect(self.run_future_ipr_analysis)
+        
+        self.future_plot = PlotWidget()
+        
+        self.future_splitter.addWidget(self.future_input)
+        self.future_splitter.addWidget(self.future_plot)
+        self.future_splitter.setStretchFactor(1, 1)
+        self.future_splitter.setSizes([400, 900])
+        
+        future_layout.addWidget(self.future_splitter)
         self.gen_subtabs.addTab(self.future_ipr_tab, "Future IPR")
         
         # Add the nested tabs to the main General tab layout
@@ -1094,6 +1182,71 @@ class MainWindow(QMainWindow):
         self._gl_thread.start()
     
     # -------------------------------------------------------------------------------
+    
+    def sync_current_to_future_ipr(self):
+        gen_vals = self.gen_input_panel.get_values()
+        self.future_input.set_values({
+            "pr_p": gen_vals.get("pr", 2500),
+            "pb": gen_vals.get("pb", 1800),
+            "pwf_test": gen_vals.get("pwf_test", 1200),
+            "qo_test": gen_vals.get("qo_test", 800)
+        })
+        self.status.showMessage("Current IPR parameters successfully carried forward.")
+
+    def run_future_ipr_analysis(self):
+        # Fetch configurations from both tabs concurrently
+        future_params = self.future_input.get_values()
+        gen_params = self.gen_input_panel.get_values() 
+        
+        params = {
+            'future': future_params,
+            'general': gen_params
+        }
+        
+        self.status.showMessage("Computing Future Forecast & Current Intersections… please wait")
+        self.future_input.run_btn.setEnabled(False)
+
+        self._fut_thread = QThread()
+        self._fut_worker = FutureIPRWorker(params)
+        self._fut_worker.moveToThread(self._fut_thread)
+        self._fut_thread.started.connect(self._fut_worker.run)
+
+        def on_done(res):
+            self.future_input.run_btn.setEnabled(True)
+            
+            # Group current baseline curves to inject as secondary comparison plots
+            comparison_curves = [
+                res.get('current_ipr'),
+                res.get('current_vlp')
+            ]
+            
+            self.future_plot.plot(
+                ipr_data=res.get('ipr'),
+                vlp_curves=comparison_curves,
+                op_point=res.get('op_point')
+            )
+            
+            Qmax_f = res.get('Qmax_f', 0)
+            pr_f = res.get('pr_f', 0)
+            q_op, p_op = res.get('op_point', (None, None))
+            
+            msg = f"Future IPR Generated  |  Future Avg. Pr = {pr_f:.0f} psia  |  Future AOF = {Qmax_f:.0f} STB/d"
+            if q_op:
+                msg += f"  |  Future Op. Point: Qo = {q_op:.0f} STB/d, Pwf = {p_op:.0f} psia"
+            else:
+                msg += "  |  No Flow: Well dies under current VLP conditions."
+                
+            self.status.showMessage(msg)
+
+        def on_err(msg):
+            self.future_input.run_btn.setEnabled(True)
+            self.status.showMessage(f"Error: {msg}")
+
+        self._fut_worker.finished.connect(on_done)
+        self._fut_worker.error.connect(on_err)
+        self._fut_worker.finished.connect(self._fut_thread.quit)
+        self._fut_worker.error.connect(self._fut_thread.quit)
+        self._fut_thread.start()
         
     def _on_done(self, result):
         self.gen_input_panel.run_btn.setEnabled(True)

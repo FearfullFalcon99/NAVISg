@@ -123,7 +123,7 @@ class GeneralInputPanel(BaseInputPanel):
         self._style_form(self.ipr_form)
         
         self.ipr_model = self._disable_scroll(QComboBox())
-        self.ipr_model.addItems(["Vogel", "Composite IPR", "Standing", "General IPR"])
+        self.ipr_model.addItems(["Vogel", "Composite IPR", "Standing", "General IPR", "Wiggins"])
         
         # --- Initialize all possible IPR inputs universally ---
         self.pr = self._dbl(500, 15000, 2500, " psia") # Always visible
@@ -266,7 +266,8 @@ class GeneralInputPanel(BaseInputPanel):
             "Vogel": ["pb", "pwf_test", "qo_test"],
             "Composite IPR": ["pb", "pwf_test", "qo_test"],
             "Standing": ["pb", "pwf_test", "qo_test", "fe_old", "re", "rw", "skin"],
-            "General IPR": ["perm_k", "thick_h", "re", "rw", "skin", "kro"]
+            "General IPR": ["perm_k", "thick_h", "re", "rw", "skin", "kro"],
+            "Wiggins": ["pb", "pwf_test", "qo_test"]
         }
         
         active_fields = fields_map.get(model, [])
@@ -484,3 +485,103 @@ class GasLiftDesignInputPanel(GeneralInputPanel):
             "qg_avail": self.qg_avail.value()
         })
         return vals
+    
+class FutureIPRInputPanel(BaseInputPanel):
+    # Custom signal to sync primary inputs
+    pull_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("futureIPRInputPanel")
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        container = QWidget()
+        main_layout = QVBoxLayout(container)
+        
+        self.btn_carry_forward = QPushButton("⟳ Carry Forward Current IPR")
+        self.btn_carry_forward.setToolTip("Pull current reservoir conditions from the General Evaluation tab.")
+        self.btn_carry_forward.setStyleSheet("""
+            QPushButton {
+                background-color: #F0E8E8; color: #8B1E1E; font-size: 13px; font-weight: bold;
+                padding: 8px; border: 1px solid #D4C3C3; border-radius: 6px; margin-bottom: 8px;
+            }
+            QPushButton:hover { background-color: #E8D0D0; }
+            QPushButton:pressed { background-color: #D4C3C3; }
+        """)
+        self.btn_carry_forward.clicked.connect(self.pull_requested.emit)
+        main_layout.addWidget(self.btn_carry_forward)
+        
+        curr_group = QGroupBox("Current Reservoir Parameters")
+        curr_form = QFormLayout(curr_group)
+        self._style_form(curr_form)
+        self.pr_p = self._dbl(500, 15000, 2500, " psia")
+        self.pb = self._dbl(100, 10000, 1800, " psia")
+        self.pwf_test = self._dbl(100, 9000, 1200, " psia")
+        self.qo_test = self._dbl(10, 10000, 800, " STB/d")
+        curr_form.addRow("Current Avg. Pressure (Pr)", self.pr_p)
+        curr_form.addRow("Bubble Point (Pb)", self.pb)
+        curr_form.addRow("Test FBHP (Pwf)", self.pwf_test)
+        curr_form.addRow("Test Rate (Qo)", self.qo_test)
+        main_layout.addWidget(curr_group)
+        
+        fut_group = QGroupBox("Future Evaluation Parameters")
+        self.fut_form = QFormLayout(fut_group)  # Make it an instance attribute
+        self._style_form(self.fut_form)
+        
+        self.ipr_model = self._disable_scroll(QComboBox())
+        self.ipr_model.addItems(["Vogel", "Wiggins"])
+        
+        self.pr_f = self._dbl(100, 15000, 1500, " psia")
+        self.method = self._disable_scroll(QComboBox())
+        self.method.addItems(["First Approximation", "Second Approximation"])
+        
+        # Use self.fut_form to add rows
+        self.fut_form.addRow("IPR Model", self.ipr_model)
+        self.fut_form.addRow("Approximation Method", self.method)
+        self.fut_form.addRow("Future Avg. Pressure (Pr_f)", self.pr_f)
+        main_layout.addWidget(fut_group)
+        
+        # Connect dynamic toggle
+        self.ipr_model.currentTextChanged.connect(self._toggle_future_fields)
+        self._toggle_future_fields() # Set initial state
+        
+        main_layout.addStretch()
+        
+        self.run_btn = QPushButton("▶ Evaluate Future IPR")
+        self.run_btn.setObjectName("runBtn")
+        self.run_btn.clicked.connect(self.run_requested.emit)
+        main_layout.addWidget(self.run_btn)
+        
+        scroll.setWidget(container)
+        QVBoxLayout(self).addWidget(scroll)
+        
+    def _toggle_future_fields(self):
+        is_vogel = self.ipr_model.currentText() == "Vogel"
+        self.method.setVisible(is_vogel)
+        
+        # Safely extract the label directly from the form layout
+        label = self.fut_form.labelForField(self.method)
+        
+        if label:
+            label.setVisible(is_vogel)
+
+    def get_values(self):
+        return {
+            "ipr_model": self.ipr_model.currentText(),
+            "pr_p": self.pr_p.value(), 
+            "pb": self.pb.value(),
+            "pwf_test": self.pwf_test.value(), 
+            "qo_test": self.qo_test.value(),
+            "pr_f": self.pr_f.value(), 
+            "method": 1 if self.method.currentText() == "First Approximation" else 2
+        }
+        
+    def set_values(self, vals):
+        if "pr_p" in vals: self.pr_p.setValue(vals["pr_p"])
+        if "pb" in vals: self.pb.setValue(vals["pb"])
+        if "pwf_test" in vals: self.pwf_test.setValue(vals["pwf_test"])
+        if "qo_test" in vals: self.qo_test.setValue(vals["qo_test"])

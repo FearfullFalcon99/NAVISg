@@ -63,6 +63,9 @@ class PlotWidget(QWidget):
         max_p = 0
         pr_val = float('inf')  # Default limit if IPR data is absent
 
+        # Detect if this is a comparison plot (Future vs Current)
+        is_comparison = any(c and 'Current IPR' in c.get('label', '') for c in (vlp_curves or []))
+
         if ipr_data is not None:
             rates, pwfs = ipr_data
             mask_ipr = pwfs >= 0
@@ -72,29 +75,56 @@ class PlotWidget(QWidget):
                 # The highest pressure in the IPR curve is the Avg. Reservoir Pressure
                 pr_val = np.max(pwfs[mask_ipr])
                 
-            line, = self.ax.plot(rates[mask_ipr], pwfs[mask_ipr], color='#2D1E1E', linewidth=2.5, linestyle='-', label='IPR')
-            self.lines.append((line, 'IPR (Inflow performance curve)'))
+            # Shift Future IPR to theme red during comparison, otherwise keep base blackish brown
+            ipr_label = 'Future IPR' if is_comparison else 'IPR (Inflow performance curve)'
+            ipr_color = '#8B1E1E' if is_comparison else '#2D1E1E'
+                
+            line, = self.ax.plot(rates[mask_ipr], pwfs[mask_ipr], color=ipr_color, linewidth=2.5, linestyle='-', label=ipr_label)
+            self.lines.append((line, ipr_label))
 
         if vlp_curves:
+            # Extended fallback palette
+            colors = ['#8B1E1E', '#A32B2B', '#B23A3A', '#CD5C5C', '#E9967A']
+            
             for i, curve in enumerate(vlp_curves):
-                color = colors[i % len(colors)]
+                if curve is None: continue 
                 
-                # --- Filter VLP points so FBHP doesn't exceed Avg. Reservoir Pressure ---
+                label = curve.get('label', '')
+                
+                # Apply high-contrast overrides for comparison curves
+                if 'Current IPR' in label:
+                    color = '#12324f'  # Deep Blue
+                    linestyle = '--'
+                    linewidth = 2.5
+                elif 'Current VLP' in label:
+                    color = '#4682B4'  # Steel Blue
+                    linestyle = '-.'
+                    linewidth = 2.0
+                else:
+                    color = colors[i % len(colors)]
+                    linestyle = '-'
+                    linewidth = 2.0
+                
                 v_rates = np.array(curve['rates'])
                 v_bhps = np.array(curve['bhps'])
                 
-                mask_vlp = v_bhps <= pr_val
+                # --- Filter points so FBHP doesn't exceed Avg. Reservoir Pressure ---
+                # Bypass the clipping filter if the curve is a comparison 'IPR'
+                if 'IPR' in label:
+                    mask_vlp = np.ones_like(v_bhps, dtype=bool)
+                else:
+                    mask_vlp = v_bhps <= pr_val
+                # ------------------------------------------------------------------------
                 
                 v_rates_filtered = v_rates[mask_vlp]
                 v_bhps_filtered = v_bhps[mask_vlp]
-                # ------------------------------------------------------------------------
                 
                 if len(v_rates_filtered) > 0:
                     max_q = max(max_q, np.max(v_rates_filtered))
                     max_p = max(max_p, np.max(v_bhps_filtered))
                     
-                line, = self.ax.plot(v_rates_filtered, v_bhps_filtered, color=color, linewidth=2, label=curve['label'])
-                self.lines.append((line, f"VLP ({curve['label']})"))
+                line, = self.ax.plot(v_rates_filtered, v_bhps_filtered, color=color, linewidth=linewidth, linestyle=linestyle, label=label)
+                self.lines.append((line, label))
 
         if op_point and op_point[0] is not None:
             q_op, p_op = op_point
