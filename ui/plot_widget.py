@@ -49,13 +49,11 @@ class PlotWidget(QWidget):
     # ui/plot_widget.py (Replace only the plot method block)-----------------------------------
 
     def plot(self, ipr_data=None, vlp_curves=None, op_point=None):
-        self._hide_annot()  # <--- ADD THIS: Hides the tooltip before clearing axes
+        self._hide_annot() 
         self.ax.cla()
         self._style_axes()
         self.lines = []
         
-        # ... (rest of your plot logic remains exactly the same)
-
         colors = ['#8B1E1E', '#A32B2B', '#B23A3A', '#CD5C5C', '#E9967A']
         
         # Dynamic Scaler Boundaries
@@ -108,13 +106,18 @@ class PlotWidget(QWidget):
                 v_rates = np.array(curve['rates'])
                 v_bhps = np.array(curve['bhps'])
                 
-                # --- Filter points so FBHP doesn't exceed Avg. Reservoir Pressure ---
+                # ========================================================================
+                # MODIFIED SECTION: Dynamic Limits for Non-Intersecting Curves
+                # ========================================================================
                 # Bypass the clipping filter if the curve is a comparison 'IPR'
                 if 'IPR' in label:
                     mask_vlp = np.ones_like(v_bhps, dtype=bool)
                 else:
-                    mask_vlp = v_bhps <= pr_val
-                # ------------------------------------------------------------------------
+                    # Allow VLP to be plotted even if there is no intersection (e.g., a dead well).
+                    # Calculate a dynamic cap to ensure the curve displays while maintaining graph scale.
+                    upper_limit = max(pr_val * 1.2, np.min(v_bhps) * 1.2) if len(v_bhps) > 0 else pr_val
+                    mask_vlp = v_bhps <= upper_limit
+                # ========================================================================
                 
                 v_rates_filtered = v_rates[mask_vlp]
                 v_bhps_filtered = v_bhps[mask_vlp]

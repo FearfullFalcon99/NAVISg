@@ -47,7 +47,20 @@ def _resolve_vlp_backend(vlp_model, inclination_deg=90.0):
             )
             dr._superficial_velocities = lambda: None 
             _, hl, _, _, _ = dr.calculate_gradient(fp['p'], return_components=True)
-            return hl, "Duns-Ros Flow"
+            
+            # ========================================================================
+            # MODIFIED SECTION: Extract Actual Flow Regime
+            # ========================================================================
+            # Retrieve the dimensionless numbers needed to map the regime
+            dim_nums = dr._dimensionless_numbers()
+            Nlv, Ngv = dim_nums[1], dim_nums[2] 
+            L1, L2 = dim_nums[4], dim_nums[5]
+            
+            # Evaluate the flow regime boundaries
+            actual_regime = dr.flow_regime(L1, L2, Nlv, Ngv)
+            
+            return hl, f"{actual_regime} Flow"
+            # ========================================================================
 
         return dr_grad, dr_holdup
 
@@ -79,7 +92,7 @@ def compute_vlp_point(q_o, whp, well_depth, T_surf, T_bh,
     q_g        = q_o * gor / 1000.0     # Mscf/d
     q_w        = q_o * wor / 100.00      # STB/d  — scales with rate
 
-    n_steps = n_steps or max(1, int(well_depth // 10.00))  # Default: 1 step per 10 ft
+    n_steps = n_steps or max(1, int(well_depth // 20.00))  # Default: 1 step per 20 ft
     depths = np.linspace(0, well_depth, n_steps + 1)
     dz     = depths[1] - depths[0]
     p      = float(whp)
@@ -114,7 +127,7 @@ def compute_vlp_curve(whp, well_depth, T_surf, T_bh,
                       vlp_model='Hagedorn-Brown', inclination_deg=90.0,
                       pvt_correlation='Standing'):
     """Build full VLP curve: arrays of (rates [STB/d], BHPs [psia])."""
-    n_steps = n_steps or max(1, int(well_depth // 10.00))  # Default: 1 step per 10 ft
+    n_steps = n_steps or max(1, int(well_depth // 20.00))  # Default: 1 step per 20 ft
     rates = np.linspace(rate_min, rate_max, n_rates)
     bhps  = []
     for q in rates:
@@ -184,7 +197,7 @@ def compute_vlp_traverse(q_o, whp, well_depth, T_surf, T_bh,
     Returns a list of dicts containing 'depth', 'pressure', 'temperature', 'holdup', and 'regime'.
     """
     if n_steps is None:
-        n_steps = max(1, int(well_depth // 10.00))  # Default: 1 step per 10 ft
+        n_steps = max(1, int(well_depth // 20.00))  # Default: 1 step per 20 ft
 
     Rs_surface = gor                     # scf/STB
     q_g        = q_o * gor / 1000.0     # Mscf/d
