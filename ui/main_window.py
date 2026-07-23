@@ -23,6 +23,7 @@ from ui.plot_widget import PlotWidget
 from ipr.standing import standing_ipr
 from ipr.vogel import vogel_ipr
 from ipr.general import general_ipr
+from ipr.fetkovich import fetkovich_ipr
 from engine.traverse import compute_vlp_curve, find_operating_point, compute_vlp_traverse
 
 
@@ -78,6 +79,11 @@ class Worker(QObject):
                 from ipr.wiggins import wiggins_ipr
                 ipr_p, ipr_q, Qmax, J = wiggins_ipr(
                     Pr=p['pr'], Pwf_test=p['pwf_test'], Qo_test=p['qo_test'],wc_pct=p['wor']
+                )
+            elif p.get('ipr_model') == 'Fetkovich':
+                ipr_p, ipr_q, Qmax, J = fetkovich_ipr(
+                    Pr=p['pr'], Pwf_test=p['pwf_test'], Qo_test=p['qo_test'], 
+                    Pb=pb, n=p.get('fetkovich_n', 1.0)
                 )
             else:
                 ipr_p, ipr_q, Qmax, J = vogel_ipr(
@@ -247,6 +253,7 @@ class GLAdvancedWorker(QObject):
             from ipr.vogel import vogel_ipr
             from ipr.standing import standing_ipr
             from ipr.general import general_ipr
+            from ipr.fetkovich import fetkovich_ipr
             from engine.traverse import find_operating_point
             
             p = self.p
@@ -269,6 +276,11 @@ class GLAdvancedWorker(QObject):
                 ipr_p, ipr_q, Qmax, J = general_ipr(
                     Pr=p['pr'], k=p.get('perm_k'), h=p.get('thick_h'), kro=p.get('kro', 1.0), 
                     mu_o=mu_o_val, Bo=bo_val, re=p.get('re'), rw=p.get('rw'), skin=p.get('skin')
+                )
+            elif p.get('ipr_model', 'Vogel') == 'Fetkovich':
+                ipr_p, ipr_q, Qmax, J = fetkovich_ipr(
+                    Pr=p['pr'], Pwf_test=p.get('pwf_test'), Qo_test=p.get('qo_test'), 
+                    Pb=pb, C=p.get('fetkovich_c'), n=p.get('fetkovich_n')
                 )
             else:
                 ipr_p, ipr_q, Qmax, J = vogel_ipr(Pr=p['pr'], Pwf_test=p['pwf_test'], Qo_test=p['qo_test'], Pb=p['pb'])
@@ -347,6 +359,11 @@ class GLLimitedWorker(QObject):
                     Pr=p['pr'], k=p.get('perm_k'), h=p.get('thick_h'), kro=p.get('kro', 1.0), 
                     mu_o=mu_o_val, Bo=bo_val, re=p.get('re'), rw=p.get('rw'), skin=p.get('skin')
                 )
+            elif p.get('ipr_model', 'Vogel') == 'Fetkovich':
+                ipr_p, ipr_q, Qmax, J = fetkovich_ipr(
+                    Pr=p['pr'], Pwf_test=p.get('pwf_test'), Qo_test=p.get('qo_test'), 
+                    Pb=pb, C=p.get('fetkovich_c'), n=p.get('fetkovich_n')
+                    )
             else:
                 from ipr.vogel import vogel_ipr
                 ipr_p, ipr_q, Qmax, J = vogel_ipr(Pr=p['pr'], Pwf_test=p['pwf_test'], Qo_test=p['qo_test'], Pb=p['pb'])
@@ -406,6 +423,7 @@ class FutureIPRWorker(QObject):
         try:
             from ipr.vogel import vogel_future_ipr, vogel_ipr
             from ipr.wiggins import wiggins_future_ipr, wiggins_ipr
+            from ipr.fetkovich import fetkovich_future_ipr, fetkovich_ipr
             from engine.traverse import compute_vlp_curve, find_operating_point
             
             fut_p = self.p['future']
@@ -422,6 +440,16 @@ class FutureIPRWorker(QObject):
                 # Evaluate Current IPR 
                 curr_pres, curr_rates, Qmax_p, _ = wiggins_ipr(
                     Pr=fut_p['pr_p'], Pwf_test=fut_p['pwf_test'], Qo_test=fut_p['qo_test'], wc_pct=gen_p['wor']
+                )
+            elif fut_p.get('ipr_model') == 'Fetkovich':
+                fut_pres, fut_rates, Qmax_f, _ = fetkovich_future_ipr(
+                    Pr_p=fut_p['pr_p'], Pwf_test=fut_p.get('pwf_test'), Qo_test=fut_p.get('qo_test'),
+                    Pb=fut_p['pb'], Pr_f=fut_p['pr_f'], 
+                    C_p=fut_p.get('fetkovich_c'), n_p=fut_p.get('fetkovich_n')
+                )
+                curr_pres, curr_rates, Qmax_p, _ = fetkovich_ipr(
+                    Pr=fut_p['pr_p'], Pwf_test=fut_p.get('pwf_test'), Qo_test=fut_p.get('qo_test'), 
+                    Pb=fut_p['pb'], C=fut_p.get('fetkovich_c'), n=fut_p.get('fetkovich_n')
                 )
             else:
                 # Default to Vogel
@@ -567,7 +595,7 @@ class MainWindow(QMainWindow):
         # --------------------------------------------------------------------------------------------- 
         self.gen_results_tabs = QTabWidget()  
             
-        #-------------------- Sub-tabs for General Evaluation--------------------------------------------------------------------
+        #-------------------- Sub-tabs for General Evaluation------------------------------------------
         self.plot_widget = PlotWidget()
         self.gen_results_tabs.addTab(self.plot_widget, "IPR-VLP")
         
@@ -734,7 +762,6 @@ class MainWindow(QMainWindow):
         gl_layout.setContentsMargins(0, 0, 0, 0)
         gl_layout.setSpacing(0) 
         
-        # --- POINT 2 & 3: Left-Aligned Header & Synchronized Dropdown Icon ---
         spin_down_url = _asset_path("spin_down.svg")
         
         self.gl_header = QWidget()
@@ -826,6 +853,7 @@ class MainWindow(QMainWindow):
         self.cw_input = GasLiftDesignInputPanel()
         self.cw_input.setMinimumWidth(400)
         self.cw_input.setMaximumWidth(400)
+        
         # --- NEW: Wire the carry forward signal ---
         self.cw_input.pull_requested.connect(self.sync_general_to_gas_lift)
         # ------------------------------------------
@@ -848,8 +876,13 @@ class MainWindow(QMainWindow):
         self.cw_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.cw_table.setAlternatingRowColors(True)
         self.cw_table.setStyleSheet("""
-            QTableWidget { background-color: #FFFFFF; alternate-background-color: #FAFAFA; border: 1px solid #D4C3C3; }
-            QTableWidget::item:hover { background-color: #E8D0D0; color: #8B1E1E; }
+            QTableWidget { 
+            background-color: #FFFFFF; 
+            alternate-background-color: #FAFAFA; 
+            border: 1px solid #D4C3C3; }
+            QTableWidget::item:hover 
+            { background-color: #E8D0D0; 
+            color: #8B1E1E; }
         """)
         cw_table_layout.addWidget(self.cw_table)
         self.cw_results_tabs.addTab(self.cw_table_tab, "GL Performance Table")
@@ -1134,7 +1167,6 @@ class MainWindow(QMainWindow):
         # 3. Notify the user via the Status Bar
         self.status.showMessage("General inputs successfully carried forward. You may now modify them as needed.")
     
-    # --- NEW CODE FOR ISSUE 2 (Executing the run and handling data sync) -------------------------------
     def run_gaslift_iprvlp_analysis(self):
         # 1. Sync values automatically if 'Carry forward' is selected
         if self.gl_new_iprvlp_input.btn_carry.isChecked():

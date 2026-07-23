@@ -123,7 +123,7 @@ class GeneralInputPanel(BaseInputPanel):
         self._style_form(self.ipr_form)
         
         self.ipr_model = self._disable_scroll(QComboBox())
-        self.ipr_model.addItems(["Vogel", "Composite IPR", "Standing", "General IPR", "Wiggins"])
+        self.ipr_model.addItems(["Vogel", "Composite IPR", "Standing", "General IPR", "Wiggins", "Fetkovich"])
         
         # --- Initialize all possible IPR inputs universally ---
         self.pr = self._dbl(500, 15000, 2500, " psia") # Always visible
@@ -141,6 +141,9 @@ class GeneralInputPanel(BaseInputPanel):
         self.thick_h = self._dbl(1.0, 2000, 30.0, " ft", decimals=1)
         self.kro     = self._dbl(0.01, 1.0, 1.0, "", decimals=3)
         
+        self.fetkovich_n = self._dbl(0.5, 1.0, 1.0, "", decimals=3)
+        self.fetkovich_c = self._dbl(0.00001, 10.0, 0.001, "", decimals=5)
+        
         # --- Add rows to the form ---
         self.ipr_form.addRow("Model", self.ipr_model)
         self.ipr_form.addRow("Avg. Reservoir Pressure", self.pr)
@@ -156,7 +159,9 @@ class GeneralInputPanel(BaseInputPanel):
             "skin": self.skin,
             "perm_k": self.perm_k,
             "thick_h": self.thick_h,
-            "kro": self.kro
+            "kro": self.kro,
+            "fetkovich_c": self.fetkovich_c,
+            "fetkovich_n": self.fetkovich_n
         }
         
         self.ipr_form.addRow("Bubble Point Pressure", self.pb)
@@ -169,6 +174,11 @@ class GeneralInputPanel(BaseInputPanel):
         self.ipr_form.addRow("Abs. Permeability (k)", self.perm_k)
         self.ipr_form.addRow("Thickness (h)", self.thick_h)
         self.ipr_form.addRow("Rel. Permeability (kro)", self.kro)
+        self.ipr_form.addRow("Performance Coeff (C)", self.fetkovich_c)
+        self.ipr_form.addRow("Flow Exponent (n)", self.fetkovich_n)
+        
+        self.pr.valueChanged.connect(self._toggle_ipr_fields)
+        self.pb.valueChanged.connect(self._toggle_ipr_fields)
         
         main_layout.addWidget(ipr_group)
         
@@ -258,25 +268,30 @@ class GeneralInputPanel(BaseInputPanel):
 
     # -------------------------------------------------------------------------------
     def _toggle_ipr_fields(self):
-        """Dynamically shows/hides QFormLayout rows based on the selected IPR Model."""
+        """Dynamically shows/hides QFormLayout rows based on the selected IPR Model & Pressures."""
         model = self.ipr_model.currentText()
+        pr_val = self.pr.value()
+        pb_val = self.pb.value()
         
-        # Map out which fields are required for which model
+        fetkovich_fields = ["pb"]
+        if pr_val <= pb_val:
+            fetkovich_fields.extend(["fetkovich_c", "fetkovich_n"])
+        else:
+            fetkovich_fields.extend(["pwf_test", "qo_test"])
+            
         fields_map = {
             "Vogel": ["pb", "pwf_test", "qo_test"],
             "Composite IPR": ["pb", "pwf_test", "qo_test"],
             "Standing": ["pb", "pwf_test", "qo_test", "fe_old", "re", "rw", "skin"],
             "General IPR": ["perm_k", "thick_h", "re", "rw", "skin", "kro"],
-            "Wiggins": ["pb", "pwf_test", "qo_test"]
+            "Wiggins": ["pb", "pwf_test", "qo_test"],
+            "Fetkovich": fetkovich_fields
         }
         
         active_fields = fields_map.get(model, [])
-        
-        # Iterate through the dictionary and toggle visibility for both the widget and its label
         for name, widget in self.dynamic_ipr_widgets.items():
             is_visible = name in active_fields
             widget.setVisible(is_visible)
-            
             label = self.ipr_form.labelForField(widget)
             if label:
                 label.setVisible(is_visible)
@@ -314,7 +329,10 @@ class GeneralInputPanel(BaseInputPanel):
             "sens_on": self.sens_on.currentText(), 
             "sens_min": self.sens_min.value(), 
             "sens_max": self.sens_max.value(), 
-            "sens_steps": self.sens_steps.value()
+            "sens_steps": self.sens_steps.value(),
+            # -------------------------------------------------------------------------------
+            "fetkovich_c": self.fetkovich_c.value(),
+            "fetkovich_n": self.fetkovich_n.value()
         }
         
     # Add this method to GeneralInputPanel-----------------------------------------------------
@@ -350,7 +368,10 @@ class GeneralInputPanel(BaseInputPanel):
         if "sens_on" in vals: self.sens_on.setCurrentText(vals["sens_on"])
         if "sens_min" in vals: self.sens_min.setValue(vals["sens_min"])
         if "sens_max" in vals: self.sens_max.setValue(vals["sens_max"])
-        if "sens_steps" in vals: self.sens_steps.setValue(vals["sens_steps"])    
+        if "sens_steps" in vals: self.sens_steps.setValue(vals["sens_steps"])
+        # -------------------------------------------------------------------------------
+        if "fetkovich_c" in vals: self.fetkovich_c.setValue(vals["fetkovich_c"])
+        if "fetkovich_n" in vals: self.fetkovich_n.setValue(vals["fetkovich_n"])    
 # ------------------------------------------------------------------------------------------
     
 class GasLiftInputPanel(BaseInputPanel):
@@ -516,16 +537,23 @@ class FutureIPRInputPanel(BaseInputPanel):
         main_layout.addWidget(self.btn_carry_forward)
         
         curr_group = QGroupBox("Current Reservoir Parameters")
+        self.curr_form = QFormLayout(curr_group) # Saved to instance
         curr_form = QFormLayout(curr_group)
         self._style_form(curr_form)
         self.pr_p = self._dbl(500, 15000, 2500, " psia")
         self.pb = self._dbl(100, 10000, 1800, " psia")
         self.pwf_test = self._dbl(100, 9000, 1200, " psia")
         self.qo_test = self._dbl(10, 10000, 800, " STB/d")
+        self.fetkovich_c = self._dbl(0.00001, 10.0, 0.001, "", decimals=5)
+        self.fetkovich_n = self._dbl(0.5, 1.0, 1.0, "", decimals=3)
+        
         curr_form.addRow("Current Avg. Pressure (Pr)", self.pr_p)
         curr_form.addRow("Bubble Point (Pb)", self.pb)
         curr_form.addRow("Test FBHP (Pwf)", self.pwf_test)
         curr_form.addRow("Test Rate (Qo)", self.qo_test)
+        self.curr_form.addRow("Current Perf. Coeff (C_p)", self.fetkovich_c)
+        self.curr_form.addRow("Current Flow Exponent (n_p)", self.fetkovich_n)
+                
         main_layout.addWidget(curr_group)
         
         fut_group = QGroupBox("Future Evaluation Parameters")
@@ -533,7 +561,10 @@ class FutureIPRInputPanel(BaseInputPanel):
         self._style_form(self.fut_form)
         
         self.ipr_model = self._disable_scroll(QComboBox())
-        self.ipr_model.addItems(["Vogel", "Wiggins"])
+        self.ipr_model.addItems(["Vogel", "Wiggins", "Fetkovich"])
+        
+        self.pr_p.valueChanged.connect(self._toggle_future_fields)
+        self.pb.valueChanged.connect(self._toggle_future_fields)
         
         self.pr_f = self._dbl(100, 15000, 1500, " psia")
         self.method = self._disable_scroll(QComboBox())
@@ -560,14 +591,30 @@ class FutureIPRInputPanel(BaseInputPanel):
         QVBoxLayout(self).addWidget(scroll)
         
     def _toggle_future_fields(self):
-        is_vogel = self.ipr_model.currentText() == "Vogel"
+        model = self.ipr_model.currentText()
+        is_vogel = (model == "Vogel")
         self.method.setVisible(is_vogel)
-        
-        # Safely extract the label directly from the form layout
         label = self.fut_form.labelForField(self.method)
-        
         if label:
             label.setVisible(is_vogel)
+            
+        # Fetkovich conditional dynamics
+        is_fetkovich = (model == "Fetkovich")
+        pr_val = self.pr_p.value()
+        pb_val = self.pb.value()
+        
+        show_test = not is_fetkovich or (is_fetkovich and pr_val > pb_val)
+        show_cn = is_fetkovich and (pr_val <= pb_val)
+        
+        for widget in [self.pwf_test, self.qo_test]:
+            widget.setVisible(show_test)
+            lbl = self.curr_form.labelForField(widget)
+            if lbl: lbl.setVisible(show_test)
+            
+        for widget in [self.fetkovich_c, self.fetkovich_n]:
+            widget.setVisible(show_cn)
+            lbl = self.curr_form.labelForField(widget)
+            if lbl: lbl.setVisible(show_cn)
 
     def get_values(self):
         return {
@@ -577,7 +624,9 @@ class FutureIPRInputPanel(BaseInputPanel):
             "pwf_test": self.pwf_test.value(), 
             "qo_test": self.qo_test.value(),
             "pr_f": self.pr_f.value(), 
-            "method": 1 if self.method.currentText() == "First Approximation" else 2
+            "method": 1 if self.method.currentText() == "First Approximation" else 2,
+            "fetkovich_c": self.fetkovich_c.value(),
+            "fetkovich_n": self.fetkovich_n.value()
         }
         
     def set_values(self, vals):
@@ -585,3 +634,5 @@ class FutureIPRInputPanel(BaseInputPanel):
         if "pb" in vals: self.pb.setValue(vals["pb"])
         if "pwf_test" in vals: self.pwf_test.setValue(vals["pwf_test"])
         if "qo_test" in vals: self.qo_test.setValue(vals["qo_test"])
+        if "fetkovich_c" in vals: self.fetkovich_c.setValue(vals["fetkovich_c"])
+        if "fetkovich_n" in vals: self.fetkovich_n.setValue(vals["fetkovich_n"])
