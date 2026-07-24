@@ -83,7 +83,7 @@ class Worker(QObject):
             elif p.get('ipr_model') == 'Fetkovich':
                 ipr_p, ipr_q, Qmax, J = fetkovich_ipr(
                     Pr=p['pr'], Pwf_test=p['pwf_test'], Qo_test=p['qo_test'], 
-                    Pb=pb, n=p.get('fetkovich_n', 1.0)
+                    Pb=pb, C=p.get('fetkovich_c'), n=p.get('fetkovich_n', 1.0) # Explicitly passing C
                 )
             else:
                 ipr_p, ipr_q, Qmax, J = vogel_ipr(
@@ -724,6 +724,8 @@ class MainWindow(QMainWindow):
         # Finalize the Current IPR tab
         self.gen_subtabs.addTab(self.current_ipr_tab, "Current IPR")
         
+        self.gen_subtabs.currentChanged.connect(self.on_gen_subtab_changed)
+        
         # --- Sub-tab b: Future IPR (Placeholder) ---
         self.future_ipr_tab = QWidget()
         future_layout = QHBoxLayout(self.future_ipr_tab)
@@ -735,7 +737,6 @@ class MainWindow(QMainWindow):
         self.future_input = FutureIPRInputPanel()
         self.future_input.setMinimumWidth(400)
         self.future_input.setMaximumWidth(400)
-        self.future_input.pull_requested.connect(self.sync_current_to_future_ipr)
         self.future_input.run_requested.connect(self.run_future_ipr_analysis)
         
         self.future_plot = PlotWidget()
@@ -1215,15 +1216,32 @@ class MainWindow(QMainWindow):
     
     # -------------------------------------------------------------------------------
     
+    # Add this method anywhere appropriate in the MainWindow class
+    def on_gen_subtab_changed(self, index):
+        if index == 1: # Future IPR tab selected
+            self.sync_current_to_future_ipr()
+
+    # Update sync_current_to_future_ipr slightly
     def sync_current_to_future_ipr(self):
         gen_vals = self.gen_input_panel.get_values()
+        
+        # Identify the selected model to fix it inside Future IPR
+        gen_model = gen_vals.get("ipr_model", "Vogel")
+        if gen_model not in ["Vogel", "Wiggins", "Fetkovich"]:
+            fixed_model = "Vogel"
+        else:
+            fixed_model = gen_model
+            
         self.future_input.set_values({
+            "ipr_model": fixed_model,
             "pr_p": gen_vals.get("pr", 2500),
             "pb": gen_vals.get("pb", 1800),
             "pwf_test": gen_vals.get("pwf_test", 1200),
-            "qo_test": gen_vals.get("qo_test", 800)
+            "qo_test": gen_vals.get("qo_test", 800),
+            "fetkovich_c": gen_vals.get("fetkovich_c", 0.001),
+            "fetkovich_n": gen_vals.get("fetkovich_n", 1.0)
         })
-        self.status.showMessage("Current IPR parameters successfully carried forward.")
+        self.status.showMessage("Current IPR parameters automatically carried forward.")
 
     def run_future_ipr_analysis(self):
         # Fetch configurations from both tabs concurrently
